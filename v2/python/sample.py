@@ -34,7 +34,6 @@ import requests
 
 
 API_HOST = 'api.yelp.com'
-DEFAULT_TERM = 'dinner'
 DEFAULT_LOCATION = 'New York, NY'
 SEARCH_LIMIT = 20
 SEARCH_PATH = '/v2/search/'
@@ -91,7 +90,7 @@ def request(host, path, url_params=None):
     Raises:
         urllib2.HTTPError: An error occurs from the HTTP request.
     """
-    url_params = url_params or {}
+    url_params = {k: v for k, v in url_params.iteritems() if v} or {}
     url = 'http://{0}{1}?'.format(host, urllib.quote(path.encode('utf8')))
 
     consumer = oauth2.Consumer(CONSUMER_KEY, CONSUMER_SECRET)
@@ -115,13 +114,14 @@ def request(host, path, url_params=None):
     return r.json()
 
 
-def search(term, location, offset=None):
+def search(term, location, offset=None, category_terms=None):
     """Query the Search API by a search term and location.
 
     Args:
         term (str): The search term passed to the API.
         location (str): The search location passed to the API.
         offset (int): The number of entries to skip ahead by.
+        category_terms (str): A comma delimited list of category filters
 
     Returns:
         dict: The JSON response from the request.
@@ -130,11 +130,13 @@ def search(term, location, offset=None):
         offset = 0
 
     url_params = {
-        'term': term.replace(' ', '+'),
+        'term': term.replace(' ', '+') if term else None,
         'location': location.replace(' ', '+'),
         'limit': SEARCH_LIMIT,
         'offset': offset,
+        'category_filter': category_terms,
     }
+
 
     return request(API_HOST, SEARCH_PATH, url_params=url_params)
 
@@ -153,16 +155,17 @@ def get_business(business_id):
     return request(API_HOST, business_path)
 
 
-def query_api(term, location, output_file=None):
+def query_api(term, location, output_file=None, category_terms=None):
     """Queries the API by the input values from the user.
 
     Args:
         term (str): The search term to query.
         location (str): The location of the business to query.
         output_file (str): File handle to write scraped CSV output to. (default: stdout)
+        category_terms (str): A comma delimited list of Yelp category filters
     """
     offset = 0
-    response = search(term, location, offset=offset)
+    response = search(term, location, offset=offset, category_terms=category_terms)
 
     businesses = response.get('businesses')
     total_businesses = response.get('total')
@@ -219,8 +222,11 @@ def main():
     parser = argparse.ArgumentParser()
 
     parser.add_argument(
-        '-q', '--term', dest='term', default=DEFAULT_TERM,
+        '-q', '--term', dest='term', default=None,
         type=str, help='Search term (default: %(default)s)')
+    parser.add_argument(
+        '-c', '--categories', dest='categories', default=None,
+        type=str, help='Comma delimited category terms (default: %(default)s)')
     parser.add_argument(
         '-l', '--location', dest='location', default=DEFAULT_LOCATION,
         type=str, help='Search location (default: %(default)s)')
@@ -230,8 +236,12 @@ def main():
 
     input_values = parser.parse_args()
 
+    if not input_values.term and not input_values.categories:
+        sys.exit('--term or --categories must be provided')
+
     try:
-        query_api(input_values.term, input_values.location, output_file=input_values.file)
+        query_api(input_values.term, input_values.location,
+                  output_file=input_values.file, category_terms=input_values.categories)
     except urllib2.HTTPError as error:
         sys.exit('Encountered HTTP error {0}. Abort program.'.format(error.code))
 
