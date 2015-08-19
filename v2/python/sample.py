@@ -137,7 +137,6 @@ def search(term, location, offset=None, category_terms=None):
         'category_filter': category_terms,
     }
 
-
     return request(API_HOST, SEARCH_PATH, url_params=url_params)
 
 
@@ -155,6 +154,25 @@ def get_business(business_id):
     return request(API_HOST, business_path)
 
 
+def _has_category_match(yelp_business, desired_categories):
+    """ Returns True if the yelp business has any category in the desired categories list. """
+    categories = _yelp_category_ids(yelp_business)
+    return len(set(desired_categories).intersection(categories)) > 0
+
+
+def _yelp_category_ids(business):
+    """ Return a list of category ids from a yelp business result. """
+    return [category_id.lower() for category_name, category_id in business.get('categories', [])]
+
+
+def _businesses_with_categories(yelp_businesses, desired_categories):
+    """ Return only businesses having a desired yelp category. """
+    if not desired_categories:
+        return yelp_businesses
+
+    return [b for b in yelp_businesses if _has_category_match(b, desired_categories)]
+
+
 def query_api(term, location, output_file=None, category_terms=None):
     """Queries the API by the input values from the user.
 
@@ -169,6 +187,13 @@ def query_api(term, location, output_file=None, category_terms=None):
 
     businesses = response.get('businesses')
     total_businesses = response.get('total')
+
+    print 'found {} matching businesses (before strictly applying category filters)'.format(
+        total_businesses)
+
+    category_ids = [c.lower() for c in category_terms.split(',')] if category_terms else None
+    if category_ids:
+        businesses = _businesses_with_categories(businesses, category_ids)
 
     with open(output_file, 'w') if output_file else sys.stdout as csv_file:
         csv_writer = UnicodeWriter(csv_file, delimiter=',')
@@ -188,6 +213,7 @@ def query_api(term, location, output_file=None, category_terms=None):
                 csv_writer.writerow([
                     business.get('name', u''),
                     business.get('phone', u''),
+                    ','.join(_yelp_category_ids(business)),
                     business.get('url', u''),
                     business_url,
                 ])
@@ -195,6 +221,8 @@ def query_api(term, location, output_file=None, category_terms=None):
             offset += SEARCH_LIMIT
             response = search(term, location, offset=offset)
             businesses = response.get('businesses')
+            if category_ids:
+                businesses = _businesses_with_categories(businesses, category_ids)
 
     print u'No more businesses for {0} in {1} found.'.format(term, location)
     return
